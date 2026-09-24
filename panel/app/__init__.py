@@ -20,7 +20,7 @@ from datetime import timedelta
 from flask import Flask, has_request_context, jsonify, render_template, request
 from flask.sessions import SecureCookieSessionInterface
 
-from . import auth
+from . import auth, metrics
 from .config import Settings
 from .extensions import csrf, limiter, login_manager
 from .proxy import TrustedProxyFix, parse_trusted
@@ -41,7 +41,7 @@ from .services.server_settings import SettingsStore
 from .services.startup import StartupSequence
 from .services.steamcmd import SteamCmdService
 
-__version__ = "1.2.4"
+__version__ = "1.2.4+k8s.1"
 
 STARTED_AT = time.time()
 
@@ -182,6 +182,7 @@ def create_app() -> Flask:
         app.register_blueprint(blueprint)
 
     _register_healthz(app)
+    metrics.register(app, __version__)
     _register_error_handlers(app)
     _register_template_globals(app, settings)
 

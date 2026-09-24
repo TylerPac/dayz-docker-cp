@@ -18,6 +18,16 @@ set -euo pipefail
 
 fail() { echo "[entrypoint] ERROR: $*" >&2; exit 1; }
 
+# Kubernetes injects <SERVICE>_PORT=tcp://ip:port for every Service in the
+# namespace, so a Service named "server", "panel", "rcon" or "steam-query"
+# overwrites one of these. gunicorn would only say "'tcp' is not a valid port".
+for var in SERVER_PORT PANEL_PORT RCON_PORT STEAM_QUERY_PORT; do
+    if [[ "${!var:-}" == *://* ]]; then
+        fail "${var} is '${!var}', which is a Kubernetes service link, not a port.
+     Set enableServiceLinks: false on the pod, or rename the Service behind it."
+    fi
+done
+
 ports="${SERVER_PORT:-2302-2304}"
 
 if [[ "${ports}" =~ ^([0-9]+)-([0-9]+)$ ]]; then

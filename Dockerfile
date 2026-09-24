@@ -82,17 +82,25 @@ RUN pip install --no-cache-dir -r /opt/panel/requirements.txt
 # to work on a host without outbound internet access, and an admin interface
 # should not depend on a third party being reachable. Kept out of the
 # repository so no minified bundles end up in version control.
+#
+# Checked against pinned SHA-256 sums: this script runs in the admin session of
+# a panel that can start processes and write files, so a tampered CDN response
+# must fail the build rather than ship. Bumping the version means bumping both
+# sums (sha256sum over the two files, fetched from two CDNs that agree).
 # ---------------------------------------------------------------------------
 ARG BOOTSTRAP_VERSION=5.3.7
+ARG BOOTSTRAP_CSS_SHA256=cd1826581e4f2b80af4f1e05897b316c7698441063cffaefbbdeec382ee4cd72
+ARG BOOTSTRAP_JS_SHA256=35f4547d9364111aca4850347356bc5660a994f0d8b694d88f995098a7b547fa
 RUN set -eux; \
     base="https://cdn.jsdelivr.net/npm/bootstrap@${BOOTSTRAP_VERSION}/dist"; \
-    mkdir -p /opt/panel/app/static/vendor; \
-    curl -fsSL "${base}/css/bootstrap.min.css" \
-        -o /opt/panel/app/static/vendor/bootstrap.min.css; \
-    curl -fsSL "${base}/js/bootstrap.bundle.min.js" \
-        -o /opt/panel/app/static/vendor/bootstrap.bundle.min.js; \
-    test -s /opt/panel/app/static/vendor/bootstrap.min.css; \
-    test -s /opt/panel/app/static/vendor/bootstrap.bundle.min.js
+    vendor=/opt/panel/app/static/vendor; \
+    mkdir -p "${vendor}"; \
+    curl -fsSL "${base}/css/bootstrap.min.css" -o "${vendor}/bootstrap.min.css"; \
+    curl -fsSL "${base}/js/bootstrap.bundle.min.js" -o "${vendor}/bootstrap.bundle.min.js"; \
+    printf '%s  %s\n' \
+        "${BOOTSTRAP_CSS_SHA256}" "${vendor}/bootstrap.min.css" \
+        "${BOOTSTRAP_JS_SHA256}" "${vendor}/bootstrap.bundle.min.js" \
+        | sha256sum -c -
 
 # ---------------------------------------------------------------------------
 # Application

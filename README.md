@@ -278,6 +278,8 @@ retention — is edited in the panel and stored in the volume.
 | `SESSION_COOKIE_SECURE` | `auto` | `auto` sets the Secure flag on HTTPS requests only. |
 | `PUID` / `PGID` | `1000` | Owner of the bind mount on Linux hosts (`id -u`, `id -g`). |
 | `TZ` | `Europe/Berlin` | Container timezone — schedules and log timestamps follow it. |
+| `SHUTDOWN_TIMEOUT` | `30` | Seconds the server gets to save when the *container* stops (5–600). |
+| `METRICS_TOKEN` | — | Bearer token for Prometheus at `/metrics`. Empty disables the endpoint. |
 
 The full list with comments is in [.env.example](.env.example).
 
@@ -297,6 +299,33 @@ Set `TRUSTED_PROXY_IPS` to your proxy's address or network (e.g.
 `172.16.0.0/12`), otherwise the panel sees the proxy as the client — which
 breaks the login rate limit and HTTPS detection. TLS itself belongs on the
 proxy; the panel deliberately does not terminate it.
+
+### On Kubernetes
+
+The image runs unchanged as a single-replica Deployment. What differs from
+Compose:
+
+- **`enableServiceLinks: false`** on the pod. Kubernetes injects
+  `<SERVICE>_PORT=tcp://…` for every Service in the namespace, so a Service
+  named `server`, `panel` or `rcon` overwrites `SERVER_PORT`, `PANEL_PORT` or
+  `RCON_PORT`. The panel refuses to start and says so, but it is easier avoided.
+- **Grace period.** Set `terminationGracePeriodSeconds` to at least
+  `SHUTDOWN_TIMEOUT + 30` (default 30 → 60). The Kubernetes default of 30s is
+  shorter than the panel's own shutdown and kills the server mid-save.
+- **`strategy: Recreate`** and one replica. Two pods on one `/data` are two
+  servers writing the same persistence.
+- **`tty: true`** on the container, for the same reason as in Compose.
+- **Game ports** are UDP and cannot go through an HTTP ingress. Use
+  `hostPort`, a `LoadBalancer` Service, or `hostNetwork`. SteamCMD and the
+  panel's own Steam query both use `127.0.0.1` inside the pod, so nothing else
+  needs a route to them.
+- **Probes**: `GET /healthz` for liveness and readiness. It answers while the
+  DayZ server is stopped, which is correct: the panel is the part that must be up.
+- **Behind an ingress** set `TRUSTED_PROXY_IPS` to the pod CIDR the ingress
+  controller runs in (`10.244.0.0/16` on kind), or the login rate limit sees
+  every user as the ingress controller.
+- **Metrics**: with `METRICS_TOKEN` set, a `ServiceMonitor` with
+  `bearerTokenSecret` scrapes state, uptime, players, memory and CPU.
 
 ---
 
@@ -341,6 +370,14 @@ re-download those.
 ---
 
 ## Release notes
+
+**1.2.4+k8s.1** (fork) — Runs on Kubernetes without surprises. A port
+variable that holds a Kubernetes service link (`tcp://…`) is named as such
+instead of failing as "not a number". The time the server gets to save when
+the container stops is `SHUTDOWN_TIMEOUT` rather than a constant tied to
+Compose's 60s, and gunicorn's graceful timeout follows it. `/metrics` serves
+Prometheus gauges behind a bearer token. Bootstrap is checked against pinned
+SHA-256 sums at build time, and the unused `psutil` dependency is gone.
 
 **1.2.4** — One Steam login, not one per job. The panel put the password on
 every SteamCMD command line, which forces a full credential login: SteamCMD

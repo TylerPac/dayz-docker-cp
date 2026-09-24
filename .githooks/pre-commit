@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Enable with: git config core.hooksPath .githooks
+# Blocks commits containing any real homelab secret value (checked against
+# /opt/KubernetesLab/secrets without printing values).
+exec python3 /opt/KubernetesLab/scripts/check-secrets.py --staged

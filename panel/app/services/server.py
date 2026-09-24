@@ -58,12 +58,13 @@ SHUTDOWN_DONE_MARKERS = ("~DayZGame()", "Termination successfully completed")
 # restart is not left waiting on a corpse.
 ENGINE_DONE_GRACE_SECONDS = 10
 
-# What the panel itself gets when the container stops, whatever the operator
-# set for a manual stop. The chain in PLAN.md 7.5 is built on this number:
-# it has to stay under gunicorn's graceful_timeout (50s), which has to stay
-# under compose's stop_grace_period (60s). A longer wait here does not buy the
-# server more time, it only moves the kill from the panel to Docker.
-CONTAINER_STOP_TIMEOUT = 30
+# What the panel itself gets when the container stops is SHUTDOWN_TIMEOUT
+# (settings.shutdown_timeout, 30s by default), whatever the operator set for a
+# manual stop. The chain in PLAN.md 7.5 is built on that number: it has to stay
+# under gunicorn's graceful_timeout (derived from it, see gunicorn.conf.py),
+# which has to stay under the orchestrator's grace period. A longer wait here
+# does not buy the server more time, it only moves the kill from the panel to
+# Docker or the kubelet.
 
 # A build that renames both markers must not strand the panel in "Starting":
 # everything gated on RUNNING - RCON, the console command line - would stay
@@ -279,7 +280,7 @@ class ServerManager:
                 return
         log.info("Panel is shutting down - stopping the DayZ server first")
         try:
-            self.stop(wait=True, timeout=min(self.stop_timeout, CONTAINER_STOP_TIMEOUT))
+            self.stop(wait=True, timeout=min(self.stop_timeout, self.settings.shutdown_timeout))
         except ServerError:
             pass
 

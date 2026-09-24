@@ -23,6 +23,23 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _service_link_hint(name: str, raw: str) -> str:
+    """Why a port variable holds a URL instead of a number, if that is why.
+
+    Kubernetes injects `<SERVICE>_PORT=tcp://10.x.x.x:1234` for every Service in
+    the namespace, so a Service called `server`, `panel` or `rcon` silently
+    overwrites SERVER_PORT, PANEL_PORT or RCON_PORT. The fix is on the pod,
+    not here: `enableServiceLinks: false`.
+    """
+    if "://" in raw:
+        return (
+            f" - it looks like a Kubernetes service link. Set "
+            f"enableServiceLinks: false on the pod, or rename the Service that "
+            f"produces {name}"
+        )
+    return ""
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -30,7 +47,9 @@ def _env_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        raise ValueError(f"{name} must be a number, got: {raw!r}") from None
+        raise ValueError(
+            f"{name} must be a number, got: {raw!r}{_service_link_hint(name, raw)}"
+        ) from None
 
 
 def _env_port_range(name: str, default: int) -> int:
@@ -51,6 +70,7 @@ def _env_port_range(name: str, default: int) -> int:
     except ValueError:
         raise ValueError(
             f"{name} must be a port range like 2302-2304, got: {raw!r}"
+            f"{_service_link_hint(name, raw)}"
         ) from None
 
 
@@ -317,6 +337,18 @@ class Settings:
     session_cookie_secure: str  # "auto" | "true" | "false"
     session_lifetime_hours: int
 
+    # --- Container lifecycle ---
+    # How long the DayZ server gets to write its persistence when the container
+    # itself is stopped. gunicorn.conf.py derives graceful_timeout from the same
+    # variable, and the orchestrator's grace period (compose stop_grace_period,
+    # Kubernetes terminationGracePeriodSeconds) must sit above both - see there.
+    shutdown_timeout: int
+
+    # --- Metrics ---
+    # Bearer token for /metrics. Empty disables the endpoint entirely: the
+    # numbers are harmless, but an unauthenticated route should be opted into.
+    metrics_token: str
+
     paths: Paths = field(default_factory=Paths.from_env)
 
     # Steam app IDs -- fixed, not a configuration value.
@@ -363,6 +395,8 @@ class Settings:
                 "SESSION_COOKIE_SECURE", "auto", {"auto", "true", "false"}
             ),
             session_lifetime_hours=_env_int("SESSION_LIFETIME_HOURS", 12),
+            shutdown_timeout=_env_shutdown_timeout(),
+            metrics_token=_env_plain("METRICS_TOKEN"),
             paths=paths,
         )
 
@@ -389,7 +423,12 @@ class Settings:
 
     def secrets_to_mask(self) -> list[str]:
         """Values that must never appear in clear text in logs or the UI."""
-        return [v for v in (self.steam_password, self.steam_guard_code, self.admin_password) if v]
+        return [
+            v for v in (
+                self.steam_password, self.steam_guard_code, self.admin_password,
+                self.metrics_token,
+            ) if v
+        ]
 
     def steam_secrets(self) -> list[str]:
         """Secrets that can plausibly show up in SteamCMD output.
@@ -399,6 +438,23 @@ class Settings:
         happens to contain it.
         """
         return [v for v in (self.steam_password, self.steam_guard_code) if v]
+
+
+# Bounds for SHUTDOWN_TIMEOUT. The upper one matches the stop timeout on the
+# settings page: a container stop has no reason to wait longer than a manual one.
+SHUTDOWN_TIMEOUT_DEFAULT = 30
+SHUTDOWN_TIMEOUT_MIN = 5
+SHUTDOWN_TIMEOUT_MAX = 600
+
+
+def _env_shutdown_timeout() -> int:
+    value = _env_int("SHUTDOWN_TIMEOUT", SHUTDOWN_TIMEOUT_DEFAULT)
+    if not SHUTDOWN_TIMEOUT_MIN <= value <= SHUTDOWN_TIMEOUT_MAX:
+        raise ValueError(
+            f"SHUTDOWN_TIMEOUT must be between {SHUTDOWN_TIMEOUT_MIN} and "
+            f"{SHUTDOWN_TIMEOUT_MAX} seconds, got: {value}"
+        )
+    return value
 
 
 def _load_or_create_secret_key(paths: Paths) -> str:

@@ -40,11 +40,15 @@ forwarded_allow_ips = ""
 timeout = int(os.environ.get("PANEL_TIMEOUT", "120"))
 
 # Long enough for the worker to shut the DayZ server down on the way out
-# (SIGTERM, up to 30s, then SIGKILL - see services/server.py). Below that,
-# gunicorn would kill the worker mid-shutdown and leave the DayZ process
-# orphaned, writing its persistence into a container that is going away.
-# Stays under the compose stop_grace_period of 60s.
-graceful_timeout = 50
+# (SIGTERM, up to SHUTDOWN_TIMEOUT, then SIGKILL - see services/server.py).
+# Below that, gunicorn would kill the worker mid-shutdown and leave the DayZ
+# process orphaned, writing its persistence into a container that is going
+# away. The 20s on top cover the kill and the worker's own exit.
+#
+# The orchestrator's grace period has to stay above this: the compose
+# stop_grace_period of 60s fits the default of 30s; on Kubernetes set
+# terminationGracePeriodSeconds to at least SHUTDOWN_TIMEOUT + 30.
+graceful_timeout = int(os.environ.get("SHUTDOWN_TIMEOUT", "30")) + 20
 keepalive = 5
 
 # --- Logging ---------------------------------------------------------------
